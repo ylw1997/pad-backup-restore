@@ -1,4 +1,4 @@
-param()
+﻿param()
 
 $ErrorActionPreference = 'Stop'
 
@@ -112,7 +112,7 @@ function Assert-PadClosed {
         ($_.ProcessName -like '*PowerAutomate*' -or $_.ProcessName -eq 'PAD.Console.Host') -and $_.MainWindowTitle
     }
     if ($padProcesses) {
-        throw 'Please close Power Automate Desktop before running this tool.'
+        throw "运行前请先完全关闭 Power Automate Desktop"
     }
 }
 
@@ -185,7 +185,7 @@ function Get-FlowName {
 
 function Get-FlowList {
     if (-not (Test-Path $script:DesignerDir)) {
-        throw 'Designer\Data folder was not found.'
+        throw '未找到 Designer\\Data 目录'
     }
 
     $settingsFiles = Get-ChildItem -LiteralPath $script:DesignerDir -Filter '*.settings' |
@@ -210,20 +210,20 @@ function Show-FlowList {
     param([object[]]$Flows)
 
     if (-not $Flows) {
-        throw 'No PAD flows were found. Create an empty flow first.'
+        throw '没有找到 PAD 自动化 请先新建空白流'
     }
 
     Write-Host ''
-    Write-Host 'Available flows:' -ForegroundColor Cyan
+    Write-Host '可选自动化列表' -ForegroundColor Cyan
     foreach ($flow in $Flows) {
-        $name = if ([string]::IsNullOrWhiteSpace($flow.Name)) { '<no-name>' } else { $flow.Name }
+        $name = if ([string]::IsNullOrWhiteSpace($flow.Name)) { '<未命名>' } else { $flow.Name }
         $line = '{0,2}. {1} | {2} | {3:yyyy-MM-dd HH:mm:ss}' -f $flow.No, $name, $flow.FlowId, $flow.LastWriteTime
         Write-Host $line
     }
 }
 
 function Select-Flow {
-    param([string]$Prompt = 'Enter row number or paste a Flow ID')
+    param([string]$Prompt = '请输入序号 或直接粘贴 Flow ID')
 
     $flows = Get-FlowList
     Show-FlowList -Flows $flows
@@ -247,7 +247,7 @@ function Select-Flow {
             }
         }
 
-        Write-Host 'Invalid selection. Try again.' -ForegroundColor Yellow
+        Write-Host '选择无效 请重新输入' -ForegroundColor Yellow
     }
 }
 
@@ -324,19 +324,19 @@ function Get-PortableBackups {
 function Select-BackupZip {
     $backups = Get-PortableBackups
     if (-not $backups -or $backups.Count -eq 0) {
-        throw ('No portable backup zip was found in ' + $script:ToolDir)
+        throw ('当前目录没有找到可用备份 zip ' + $script:ToolDir)
     }
 
     Write-Host ''
-    Write-Host 'Available backup packages:' -ForegroundColor Cyan
+    Write-Host '可选备份包' -ForegroundColor Cyan
     foreach ($backup in $backups) {
-        $name = if ([string]::IsNullOrWhiteSpace($backup.SourceFlowName)) { '<no-name>' } else { $backup.SourceFlowName }
+        $name = if ([string]::IsNullOrWhiteSpace($backup.SourceFlowName)) { '<未命名>' } else { $backup.SourceFlowName }
         $line = '{0,2}. {1} | {2} | {3} | {4}' -f $backup.No, $name, $backup.SourceFlowId, $backup.BackupTime, $backup.FileName
         Write-Host $line
     }
 
     while ($true) {
-        $answer = Read-Answer -Prompt 'Enter backup row number'
+        $answer = Read-Answer -Prompt '请输入备份包序号'
         if ($answer -match '^\d+$') {
             $selected = $backups | Where-Object { $_.No -eq [int]$answer } | Select-Object -First 1
             if ($selected) {
@@ -344,15 +344,15 @@ function Select-BackupZip {
             }
         }
 
-        Write-Host 'Invalid selection. Try again.' -ForegroundColor Yellow
+        Write-Host '选择无效 请重新输入' -ForegroundColor Yellow
     }
 }
 
 function Backup-Flow {
     Assert-PadClosed
-    Write-Section 'Backup Flow'
+    Write-Section '备份自动化'
 
-    $flow = Select-Flow -Prompt 'Choose the flow to back up'
+    $flow = Select-Flow -Prompt '请选择要备份的自动化'
     $cachePaths = Get-CachePaths -FlowId $flow.FlowId
 
     $settingsPath = Join-Path $script:DesignerDir ($flow.FlowId + '.settings')
@@ -360,13 +360,13 @@ function Backup-Flow {
     $scriptsPath = Join-Path $script:ScriptsDir $flow.FlowId
 
     if (-not (Test-Path $settingsPath)) {
-        throw 'Missing settings file for the selected flow.'
+        throw '所选自动化缺少 settings 文件'
     }
     if (-not (Test-Path $workspacePath)) {
-        throw 'Missing workspace folder for the selected flow.'
+        throw '所选自动化缺少 workspace 目录'
     }
     if (-not (Test-Path $cachePaths.FullBin) -or -not (Test-Path $cachePaths.FullMeta)) {
-        throw 'Missing full-package cache for the selected flow.'
+        throw '所选自动化缺少 full-package 缓存'
     }
 
     $tempRoot = New-TempDir -Prefix 'pad-portable-backup'
@@ -422,10 +422,10 @@ function Backup-Flow {
         Compress-Archive -Path (Join-Path $tempRoot '*') -DestinationPath $zipPath -Force
 
         Write-Host ''
-        Write-Host 'Backup complete.' -ForegroundColor Green
-        Write-Host ('Flow name: ' + $flow.Name)
-        Write-Host ('Flow ID: ' + $flow.FlowId)
-        Write-Host ('Zip file: ' + $zipPath)
+        Write-Host '备份完成' -ForegroundColor Green
+        Write-Host ('自动化名称 ' + $flow.Name)
+        Write-Host ('自动化 ID ' + $flow.FlowId)
+        Write-Host ('备份文件 ' + $zipPath)
     }
     finally {
         if (Test-Path $tempRoot) {
@@ -436,10 +436,10 @@ function Backup-Flow {
 
 function Restore-Flow {
     Assert-PadClosed
-    Write-Section 'Restore Flow'
+    Write-Section '恢复自动化'
 
     $backup = Select-BackupZip
-    $targetFlow = Select-Flow -Prompt 'Choose the target flow to restore into'
+    $targetFlow = Select-Flow -Prompt '请选择要恢复到的目标自动化'
 
     $tempRoot = New-TempDir -Prefix 'pad-portable-restore'
     try {
@@ -447,12 +447,12 @@ function Restore-Flow {
 
         $manifestPath = Join-Path $tempRoot 'manifest.json'
         if (-not (Test-Path $manifestPath)) {
-            throw 'The selected zip does not contain manifest.json.'
+            throw '所选备份包不包含 manifest.json'
         }
 
         $manifest = Read-PlainJson -Path $manifestPath
         if ($manifest['Format'] -ne 'PADPortableBackup' -or $manifest['Version'] -ne 1) {
-            throw 'The selected zip is not a supported PAD portable backup.'
+            throw '所选备份包不是受支持的 PAD 备份格式'
         }
 
         $settingsSource = Join-Path $tempRoot 'settings\flow.settings'
@@ -464,13 +464,13 @@ function Restore-Flow {
         $partialMetaJsonPath = Join-Path $tempRoot 'partial-package.meta.json'
 
         if (-not (Test-Path $settingsSource)) {
-            throw 'Backup zip is missing settings\flow.settings.'
+            throw '备份包缺少 settings\\flow.settings'
         }
         if (-not (Test-Path $workspaceSource)) {
-            throw 'Backup zip is missing workspace data.'
+            throw '备份包缺少 workspace 数据'
         }
         if (-not (Test-Path $fullJsonPath) -or -not (Test-Path $fullMetaJsonPath)) {
-            throw 'Backup zip is missing full-package data.'
+            throw '备份包缺少 full-package 数据'
         }
 
         $targetSettings = Join-Path $script:DesignerDir ($targetFlow.FlowId + '.settings')
@@ -532,15 +532,15 @@ function Restore-Flow {
         }
 
         Write-Host ''
-        Write-Host 'Restore complete.' -ForegroundColor Green
-        Write-Host ('Backup package: ' + $backup.FileName)
-        Write-Host ('Source flow: ' + $manifest['SourceFlowName'] + ' [' + $manifest['SourceFlowId'] + ']')
-        Write-Host ('Target flow: ' + $targetFlowName + ' [' + $targetFlow.FlowId + ']')
+        Write-Host '恢复完成' -ForegroundColor Green
+        Write-Host ('备份包 ' + $backup.FileName)
+        Write-Host ('来源自动化 ' + $manifest['SourceFlowName'] + ' [' + $manifest['SourceFlowId'] + ']')
+        Write-Host ('目标自动化 ' + $targetFlowName + ' [' + $targetFlow.FlowId + ']')
         Write-Host ''
-        Write-Host 'Next steps:' -ForegroundColor Cyan
-        Write-Host '1. Open Power Automate Desktop.'
-        Write-Host '2. Open the target flow.'
-        Write-Host '3. Save once after it loads correctly.'
+        Write-Host '下一步建议' -ForegroundColor Cyan
+        Write-Host '1. 打开 Power Automate Desktop'
+        Write-Host '2. 进入目标自动化'
+        Write-Host '3. 确认内容正常后手动保存一次'
     }
     finally {
         if (Test-Path $tempRoot) {
@@ -550,17 +550,17 @@ function Restore-Flow {
 }
 
 function Show-MainMenu {
-    Write-Section 'PAD Portable Backup / Restore'
-    Write-Host '1. Backup a flow'
-    Write-Host '2. Restore from a backup zip'
-    Write-Host 'Q. Exit'
+    Write-Section 'PAD 备份恢复工具'
+    Write-Host '1. 备份自动化'
+    Write-Host '2. 从备份包恢复'
+    Write-Host 'Q. 退出'
     Write-Host ''
 }
 
 try {
     while ($true) {
         Show-MainMenu
-        $choice = (Read-Answer -Prompt 'Choose an option').ToUpperInvariant()
+        $choice = (Read-Answer -Prompt '请选择功能').ToUpperInvariant()
 
         switch ($choice) {
             '1' {
@@ -573,13 +573,13 @@ try {
                 break
             }
             default {
-                Write-Host 'Invalid option. Try again.' -ForegroundColor Yellow
+                Write-Host '输入无效 请重新选择' -ForegroundColor Yellow
                 continue
             }
         }
 
         Write-Host ''
-        $again = (Read-Answer -Prompt 'Press Enter to return to menu, or type Q to exit').ToUpperInvariant()
+        $again = (Read-Answer -Prompt '按回车返回主菜单 或输入 Q 退出').ToUpperInvariant()
         if ($again -eq 'Q') {
             break
         }
@@ -587,10 +587,10 @@ try {
 }
 catch {
     Write-Host ''
-    Write-Host 'Error:' -ForegroundColor Red
+    Write-Host '发生错误' -ForegroundColor Red
     Write-Host $_.Exception.Message -ForegroundColor Red
 }
 finally {
     Write-Host ''
-    Read-Answer -Prompt 'Press Enter to close' | Out-Null
+    Read-Answer -Prompt '按回车关闭窗口' | Out-Null
 }
