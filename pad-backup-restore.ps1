@@ -271,6 +271,30 @@ function Copy-DirectoryContents {
     }
 }
 
+function Get-WorkspaceSnapshotState {
+    param(
+        [string]$SettingsPath,
+        [string]$WorkspacePath,
+        [string]$FullPackagePath
+    )
+
+    if (-not (Test-Path $WorkspacePath)) {
+        return [pscustomobject]@{
+            Status = 'Missing'
+            IncludeWorkspace = $false
+            WorkspaceWriteTime = $null
+            ReferenceWriteTime = $null
+        }
+    }
+
+    return [pscustomobject]@{
+        Status = 'Present'
+        IncludeWorkspace = $true
+        WorkspaceWriteTime = $null
+        ReferenceWriteTime = $null
+    }
+}
+
 function Get-PortableBackups {
     $zipFiles = Get-ChildItem -LiteralPath $script:ToolDir -Filter '*.zip' |
         Sort-Object LastWriteTime -Descending
@@ -362,12 +386,11 @@ function Backup-Flow {
     if (-not (Test-Path $settingsPath)) {
         throw '所选自动化缺少 settings 文件'
     }
-    if (-not (Test-Path $workspacePath)) {
-        throw '所选自动化缺少 workspace 目录'
-    }
     if (-not (Test-Path $cachePaths.FullBin) -or -not (Test-Path $cachePaths.FullMeta)) {
         throw '所选自动化缺少 full-package 缓存'
     }
+
+    $workspaceState = Get-WorkspaceSnapshotState -SettingsPath $settingsPath -WorkspacePath $workspacePath -FullPackagePath $cachePaths.FullBin
 
     $tempRoot = New-TempDir -Prefix 'pad-portable-backup'
     try {
@@ -375,10 +398,14 @@ function Backup-Flow {
         $workspaceExport = Join-Path $tempRoot 'workspace'
         $scriptsExport = Join-Path $tempRoot 'scripts'
         New-Item -ItemType Directory -Path $settingsExport -Force | Out-Null
-        New-Item -ItemType Directory -Path $workspaceExport -Force | Out-Null
 
         Copy-Item -LiteralPath $settingsPath -Destination (Join-Path $settingsExport 'flow.settings') -Force
-        Copy-DirectoryContents -Source $workspacePath -Destination $workspaceExport
+        $hasWorkspace = $false
+        if ($workspaceState.IncludeWorkspace) {
+            New-Item -ItemType Directory -Path $workspaceExport -Force | Out-Null
+            Copy-DirectoryContents -Source $workspacePath -Destination $workspaceExport
+            $hasWorkspace = $true
+        }
 
         $fullObj = Read-ProtectedJson -Path $cachePaths.FullBin
         $fullMetaObj = Read-ProtectedJson -Path $cachePaths.FullMeta
@@ -407,6 +434,8 @@ function Backup-Flow {
             CreatedAt = (Get-Date).ToString('o')
             SourceFlowId = $flow.FlowId
             SourceFlowName = $flow.Name
+            HasWorkspace = $hasWorkspace
+            WorkspaceStatus = $workspaceState.Status
             HasPartialPackage = $hasPartial
             HasScripts = $hasScripts
             Tool = 'pad-backup-restore.ps1'
@@ -426,6 +455,9 @@ function Backup-Flow {
         Write-Host ('自动化名称 ' + $flow.Name)
         Write-Host ('自动化 ID ' + $flow.FlowId)
         Write-Host ('备份文件 ' + $zipPath)
+        if (-not $hasWorkspace) {
+            Write-Host '提示 当前自动化没有可用 workspace 已仅备份 full-package/settings' -ForegroundColor Yellow
+        }
     }
     finally {
         if (Test-Path $tempRoot) {
@@ -466,9 +498,6 @@ function Restore-Flow {
         if (-not (Test-Path $settingsSource)) {
             throw '备份包缺少 settings\\flow.settings'
         }
-        if (-not (Test-Path $workspaceSource)) {
-            throw '备份包缺少 workspace 数据'
-        }
         if (-not (Test-Path $fullJsonPath) -or -not (Test-Path $fullMetaJsonPath)) {
             throw '备份包缺少 full-package 数据'
         }
@@ -488,7 +517,16 @@ function Restore-Flow {
         if (Test-Path $targetWorkspace) {
             Remove-Item -LiteralPath $targetWorkspace -Recurse -Force
         }
-        Copy-DirectoryContents -Source $workspaceSource -Destination $targetWorkspace
+        $backupHasWorkspace = $true
+        if ($manifest.ContainsKey('HasWorkspace')) {
+            $backupHasWorkspace = [bool]$manifest['HasWorkspace']
+        }
+        elseif (-not (Test-Path $workspaceSource)) {
+            $backupHasWorkspace = $false
+        }
+        if ($backupHasWorkspace -and (Test-Path $workspaceSource)) {
+            Copy-DirectoryContents -Source $workspaceSource -Destination $targetWorkspace
+        }
 
         if (Test-Path $targetScripts) {
             Remove-Item -LiteralPath $targetScripts -Recurse -Force
@@ -536,6 +574,9 @@ function Restore-Flow {
         Write-Host ('备份包 ' + $backup.FileName)
         Write-Host ('来源自动化 ' + $manifest['SourceFlowName'] + ' [' + $manifest['SourceFlowId'] + ']')
         Write-Host ('目标自动化 ' + $targetFlowName + ' [' + $targetFlow.FlowId + ']')
+        if (-not $backupHasWorkspace) {
+            Write-Host '提示 本备份包未恢复 workspace 将以 full-package 为准' -ForegroundColor Yellow
+        }
         Write-Host ''
         Write-Host '下一步建议' -ForegroundColor Cyan
         Write-Host '1. 打开 Power Automate Desktop'
@@ -557,40 +598,42 @@ function Show-MainMenu {
     Write-Host ''
 }
 
-try {
-    while ($true) {
-        Show-MainMenu
-        $choice = (Read-Answer -Prompt '请选择功能').ToUpperInvariant()
+if (-not $env:PAD_BACKUP_RESTORE_TEST_MODE) {
+    try {
+        while ($true) {
+            Show-MainMenu
+            $choice = (Read-Answer -Prompt '请选择功能').ToUpperInvariant()
 
-        switch ($choice) {
-            '1' {
-                Backup-Flow
+            switch ($choice) {
+                '1' {
+                    Backup-Flow
+                }
+                '2' {
+                    Restore-Flow
+                }
+                'Q' {
+                    break
+                }
+                default {
+                    Write-Host '输入无效 请重新选择' -ForegroundColor Yellow
+                    continue
+                }
             }
-            '2' {
-                Restore-Flow
-            }
-            'Q' {
+
+            Write-Host ''
+            $again = (Read-Answer -Prompt '按回车返回主菜单 或输入 Q 退出').ToUpperInvariant()
+            if ($again -eq 'Q') {
                 break
             }
-            default {
-                Write-Host '输入无效 请重新选择' -ForegroundColor Yellow
-                continue
-            }
-        }
-
-        Write-Host ''
-        $again = (Read-Answer -Prompt '按回车返回主菜单 或输入 Q 退出').ToUpperInvariant()
-        if ($again -eq 'Q') {
-            break
         }
     }
-}
-catch {
-    Write-Host ''
-    Write-Host '发生错误' -ForegroundColor Red
-    Write-Host $_.Exception.Message -ForegroundColor Red
-}
-finally {
-    Write-Host ''
-    Read-Answer -Prompt '按回车关闭窗口' | Out-Null
+    catch {
+        Write-Host ''
+        Write-Host '发生错误' -ForegroundColor Red
+        Write-Host $_.Exception.Message -ForegroundColor Red
+    }
+    finally {
+        Write-Host ''
+        Read-Answer -Prompt '按回车关闭窗口' | Out-Null
+    }
 }

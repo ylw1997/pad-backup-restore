@@ -56,7 +56,7 @@ FlowId_yyyyMMdd_HHmmss.zip
 工具生成的备份包包含：
 
 - `settings`
-- `workspace`
+- `workspace`（如果本地存在就会打包）
 - `full-package`
 - `full-package.meta`
 - `partial-package`
@@ -66,14 +66,19 @@ FlowId_yyyyMMdd_HHmmss.zip
 恢复时最关键的是：
 
 - `full-package`
-- `workspace`
 - `settings`
+
+`workspace` 现在是可选项：
+
+- 如果本地存在 `workspace`，工具会一并打包
+- 如果某个流本地没有 `workspace`，恢复时会以 `full-package` 为准
 
 ## 注意事项
 
 - 运行工具前必须关闭 Power Automate Desktop。
 - 恢复前建议先新建一个空白自动化作为目标流。
 - 刚新建的空流名称有时不在 `full-package`，而是在本地 `flowMetadata` 缓存里，工具已经兼容这种情况。
+- 某些 PAD 版本里，最新改动可能只在 `workspace` 里，还没同步到 `full-package`，所以工具会优先把 `workspace` 一起带上。
 - 恢复完成后，建议立刻打开目标自动化并保存一次。
 - 建议只保留已经验证可用的备份包，避免目录里备份包太多不好选。
 
