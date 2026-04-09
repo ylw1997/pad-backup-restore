@@ -14,6 +14,7 @@ $script:DesignerDir = Join-Path $script:PadBase 'Designer\Data'
 $script:WorkspaceDir = Join-Path $script:PadBase 'Console\Workspace'
 $script:ScriptsDir = Join-Path $script:PadBase 'Console\Scripts'
 $script:AuthoringDir = Join-Path $script:PadBase 'Cache\Store\Authoring'
+$script:DebuggerTempDir = Join-Path $env:LOCALAPPDATA 'Temp\PADDebuggerTemp'
 
 function Write-Section {
     param([string]$Title)
@@ -295,6 +296,50 @@ function Get-WorkspaceSnapshotState {
     }
 }
 
+function Get-WorkspaceCopyPlan {
+    param(
+        [string]$WorkspacePath,
+        [string]$DebuggerTempPath
+    )
+
+    $workspacePackage = $null
+    $workspacePackageName = ''
+    if (Test-Path $WorkspacePath) {
+        $packageDirs = Get-ChildItem -LiteralPath $WorkspacePath -Directory -Force -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending
+        if ($packageDirs -and $packageDirs.Count -gt 0) {
+            $workspacePackage = $packageDirs[0].FullName
+            $workspacePackageName = $packageDirs[0].Name
+        }
+    }
+
+    $debuggerScript = Join-Path $DebuggerTempPath 'script.robin'
+    if (Test-Path $debuggerScript) {
+        return [pscustomobject]@{
+            Status = 'DebuggerTemp'
+            IncludeWorkspace = $true
+            SourcePath = $DebuggerTempPath
+            ExportRootName = if ($workspacePackageName) { $workspacePackageName } else { '1DE9DF00' }
+        }
+    }
+
+    if ($workspacePackage) {
+        return [pscustomobject]@{
+            Status = 'Workspace'
+            IncludeWorkspace = $true
+            SourcePath = $workspacePackage
+            ExportRootName = $workspacePackageName
+        }
+    }
+
+    return [pscustomobject]@{
+        Status = 'Missing'
+        IncludeWorkspace = $false
+        SourcePath = $null
+        ExportRootName = ''
+    }
+}
+
 function Get-PortableBackups {
     $zipFiles = Get-ChildItem -LiteralPath $script:ToolDir -Filter '*.zip' |
         Sort-Object LastWriteTime -Descending
@@ -381,6 +426,7 @@ function Backup-Flow {
 
     $settingsPath = Join-Path $script:DesignerDir ($flow.FlowId + '.settings')
     $workspacePath = Join-Path $script:WorkspaceDir $flow.FlowId
+    $debuggerTempPath = Join-Path $script:DebuggerTempDir $flow.FlowId
     $scriptsPath = Join-Path $script:ScriptsDir $flow.FlowId
 
     if (-not (Test-Path $settingsPath)) {
@@ -391,6 +437,7 @@ function Backup-Flow {
     }
 
     $workspaceState = Get-WorkspaceSnapshotState -SettingsPath $settingsPath -WorkspacePath $workspacePath -FullPackagePath $cachePaths.FullBin
+    $workspacePlan = Get-WorkspaceCopyPlan -WorkspacePath $workspacePath -DebuggerTempPath $debuggerTempPath
 
     $tempRoot = New-TempDir -Prefix 'pad-portable-backup'
     try {
@@ -401,9 +448,15 @@ function Backup-Flow {
 
         Copy-Item -LiteralPath $settingsPath -Destination (Join-Path $settingsExport 'flow.settings') -Force
         $hasWorkspace = $false
-        if ($workspaceState.IncludeWorkspace) {
+        if ($workspacePlan.IncludeWorkspace) {
             New-Item -ItemType Directory -Path $workspaceExport -Force | Out-Null
-            Copy-DirectoryContents -Source $workspacePath -Destination $workspaceExport
+            $workspaceDestination = if ($workspacePlan.ExportRootName) {
+                Join-Path $workspaceExport $workspacePlan.ExportRootName
+            }
+            else {
+                $workspaceExport
+            }
+            Copy-DirectoryContents -Source $workspacePlan.SourcePath -Destination $workspaceDestination
             $hasWorkspace = $true
         }
 
@@ -435,7 +488,7 @@ function Backup-Flow {
             SourceFlowId = $flow.FlowId
             SourceFlowName = $flow.Name
             HasWorkspace = $hasWorkspace
-            WorkspaceStatus = $workspaceState.Status
+            WorkspaceStatus = $workspacePlan.Status
             HasPartialPackage = $hasPartial
             HasScripts = $hasScripts
             Tool = 'pad-backup-restore.ps1'
