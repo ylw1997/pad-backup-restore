@@ -15,6 +15,7 @@ $script:WorkspaceDir = Join-Path $script:PadBase 'Console\Workspace'
 $script:ScriptsDir = Join-Path $script:PadBase 'Console\Scripts'
 $script:AuthoringDir = Join-Path $script:PadBase 'Cache\Store\Authoring'
 $script:DebuggerTempDir = Join-Path $env:LOCALAPPDATA 'Temp\PADDebuggerTemp'
+$script:DesignerTempDir = Join-Path $script:PadBase 'Designer\Temp'
 
 function Write-Section {
     param([string]$Title)
@@ -299,7 +300,8 @@ function Get-WorkspaceSnapshotState {
 function Get-WorkspaceCopyPlan {
     param(
         [string]$WorkspacePath,
-        [string]$DebuggerTempPath
+        [string]$DebuggerTempPath,
+        [string]$DesignerTempRoot
     )
 
     $workspacePackage = $null
@@ -314,6 +316,23 @@ function Get-WorkspaceCopyPlan {
     }
 
     $debuggerScript = Join-Path $DebuggerTempPath 'script.robin'
+    $designerTempDir = $null
+    if (Test-Path $DesignerTempRoot) {
+        $designerTempDir = Get-ChildItem -LiteralPath $DesignerTempRoot -Directory -Force -ErrorAction SilentlyContinue |
+            Where-Object { Test-Path (Join-Path $_.FullName 'script.robin') } |
+            Sort-Object LastWriteTime -Descending |
+            Select-Object -First 1
+    }
+
+    if ($designerTempDir) {
+        return [pscustomobject]@{
+            Status = 'DesignerTemp'
+            IncludeWorkspace = $true
+            SourcePath = $designerTempDir.FullName
+            ExportRootName = if ($workspacePackageName) { $workspacePackageName } else { '1DE9DF00' }
+        }
+    }
+
     if (Test-Path $debuggerScript) {
         return [pscustomobject]@{
             Status = 'DebuggerTemp'
@@ -427,6 +446,7 @@ function Backup-Flow {
     $settingsPath = Join-Path $script:DesignerDir ($flow.FlowId + '.settings')
     $workspacePath = Join-Path $script:WorkspaceDir $flow.FlowId
     $debuggerTempPath = Join-Path $script:DebuggerTempDir $flow.FlowId
+    $designerTempRoot = $script:DesignerTempDir
     $scriptsPath = Join-Path $script:ScriptsDir $flow.FlowId
 
     if (-not (Test-Path $settingsPath)) {
@@ -437,7 +457,7 @@ function Backup-Flow {
     }
 
     $workspaceState = Get-WorkspaceSnapshotState -SettingsPath $settingsPath -WorkspacePath $workspacePath -FullPackagePath $cachePaths.FullBin
-    $workspacePlan = Get-WorkspaceCopyPlan -WorkspacePath $workspacePath -DebuggerTempPath $debuggerTempPath
+    $workspacePlan = Get-WorkspaceCopyPlan -WorkspacePath $workspacePath -DebuggerTempPath $debuggerTempPath -DesignerTempRoot $designerTempRoot
 
     $tempRoot = New-TempDir -Prefix 'pad-portable-backup'
     try {
